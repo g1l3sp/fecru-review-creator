@@ -1,7 +1,6 @@
 package com.atlassian.example.reviewcreator;
 
-import java.util.Collection;
-import java.util.List;
+import java.util.Map;
 
 /**
  * Manages plugin settings serialization and persistence.
@@ -9,45 +8,60 @@ import java.util.List;
  */
 public interface ConfigurationManager {
 
+    // Key for an ExpressionReviewConfig that is strictly used as a prototype and shouldn't be evaluated
+    public static final String CONFIG_PROTOTYPE_KEY = "CONFIG_PROTOTYPE";
+
     String loadRunAsUser();
 
     void storeRunAsUser(String username);
 
-    List<String> loadEnabledProjects();
-
-    void storeEnabledProjects(List<String> projectKeys);
+    public Map<String,String> loadRawExpressionConfigMap();
 
     /**
-     * @since   v1.2
+     * @return a map where the the expression configurations are the values and the keys are their names.
+     * Possibly empty, but Never null.
      */
-    Collection<String> loadCrucibleUserNames();
+    Map<String, ExpressionReviewConfig> loadExpressionConfigMap();
 
-    /**
-     * @since   v1.2
-     */
-    void storeCrucibleUserNames(Collection<String> usernames);
+    public void storeRawExpressionConfigMap(Map<String,String> rawConfigMap);
 
-    /**
-     * @since   v1.3
-     */
-    Collection<String> loadCrucibleGroups();
+    void storeExpressionConfigMap(Map<String, ExpressionReviewConfig> expressionConfigMap);
 
-    /**
-     * @since   v1.3
-     */
-    void storeCrucibleGroups(Collection<String> groupnames);
-
-    CreateMode loadCreateMode();
-
-    void storeCreateMode(CreateMode mode);
-
-    /**
-     * @since   v1.4.1
-     */
-    boolean loadIterative();
-
-    /**
-     * @since   v1.4.1
-     */
-    void storeIterative(boolean iterative);
+//    List<String> loadEnabledProjects();
+//
+//    void storeEnabledProjects(List<String> projectKeys);
+//
+//    /**
+//     * @since   v1.2
+//     */
+//    Collection<String> loadCrucibleUserNames();
+//
+//    /**
+//     * @since   v1.2
+//     */
+//    void storeCrucibleUserNames(Collection<String> usernames);
+//
+//    /**
+//     * @since   v1.3
+//     */
+//    Collection<String> loadCrucibleGroups();
+//
+//    /**
+//     * @since   v1.3
+//     */
+//    void storeCrucibleGroups(Collection<String> groupnames);
+//
+//    CreateMode loadCreateMode();
+//
+//    void storeCreateMode(CreateMode mode);
+//
+//    /**
+//     * @since   v1.4.1
+//     */
+//    boolean loadIterative();
+//
+//    /**
+//     * @since   v1.4.1
+//     */
+//    void storeIterative(boolean iterative);
 }

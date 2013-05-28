@@ -23,17 +23,18 @@ public class ConfigurationManagerImplTest {
         final String user = "foo";
         final List<String> expected = Arrays.asList("CR", "RC");
         final ConfigurationManagerImpl config = new ConfigurationManagerImpl(store);
-        assertTrue(config.loadEnabledProjects().isEmpty());
+        assertTrue(config.loadExpressionConfigMap().size() == 1);
+//        assertTrue(config.loadEnabledProjects().isEmpty());
         assertNull(config.loadRunAsUser());
 
         config.storeRunAsUser(user);
         assertEquals(user, config.loadRunAsUser());
 
-        config.storeEnabledProjects(expected);
-        assertEquals(expected.size(), config.loadEnabledProjects().size());
-        List<String> actual = new ArrayList<String>(config.loadEnabledProjects());
-        actual.removeAll(expected);
-        assertTrue(actual.isEmpty());
+//        config.storeEnabledProjects(expected);
+//        assertEquals(expected.size(), config.loadEnabledProjects().size());
+//        List<String> actual = new ArrayList<String>(config.loadEnabledProjects());
+//        actual.removeAll(expected);
+//        assertTrue(actual.isEmpty());
     }
 
     private static class SettingsMock implements PluginSettings {

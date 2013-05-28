@@ -1,21 +1,23 @@
 package com.atlassian.example.reviewcreator;
 
-import com.atlassian.crucible.spi.data.*;
 import com.atlassian.crucible.spi.PermId;
+import com.atlassian.crucible.spi.data.*;
 import com.atlassian.crucible.spi.services.*;
 import com.atlassian.event.Event;
 import com.atlassian.event.EventListener;
+import com.atlassian.example.reviewcreator.*;
 import com.atlassian.fisheye.event.CommitEvent;
 import com.atlassian.fisheye.spi.data.ChangesetDataFE;
+import com.atlassian.fisheye.spi.data.FileRevisionKeyData;
 import com.atlassian.fisheye.spi.services.RevisionDataService;
 import com.atlassian.sal.api.user.UserManager;
-import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Iterables;
 import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
 
 import java.util.*;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Pattern;
 
 /**
  * <p>
@@ -57,12 +59,12 @@ public class CommitListener implements EventListener {
             new ThreadLocal();
 
     public CommitListener(ConfigurationManager config,
-            ReviewService reviewService,
-            ProjectService projectService,
-            RevisionDataService revisionService,
-            UserService userService,
-            UserManager userManager,
-            ImpersonationService impersonator) {
+                          ReviewService reviewService,
+                          ProjectService projectService,
+                          RevisionDataService revisionService,
+                          UserService userService,
+                          UserManager userManager,
+                          ImpersonationService impersonator) {
 
         this.reviewService = reviewService;
         this.revisionService = revisionService;
@@ -83,41 +85,9 @@ public class CommitListener implements EventListener {
 
         if (isPluginEnabled()) {
             try {
+
                 // switch to admin user so we can access all projects and API services:
-                impersonator.doAsUser(null, config.loadRunAsUser(),
-                    new Operation<Void, ServerException>() {
-                        public Void perform() throws ServerException {
-
-                            final ChangesetDataFE cs = revisionService.getChangeset(
-                                    commit.getRepositoryName(), commit.getChangeSetId());
-                            final ProjectData project = getEnabledProjectForRepository(
-                                    commit.getRepositoryName());
-
-                            if (project != null) {
-                                committerToCrucibleUser.set(loadCommitterMappings(project.getDefaultRepositoryName()));
-                                if (project.getDefaultModerator() != null) {
-                                    if (isUnderScrutiny(cs.getAuthor())) {
-                                        if (!config.loadIterative() || !appendToReview(commit.getRepositoryName(), cs, project)) {
-                                            // create a new review:
-                                            createReview(commit.getRepositoryName(), cs, project);
-                                        }
-                                    } else {
-                                        logger.info(String.format("Not creating a review for changeset %s.",
-                                                commit.getChangeSetId()));
-                                    }
-                                } else {
-                                    logger.error(String.format("Unable to auto-create review for changeset %s. " +
-                                            "No default moderator configured for project %s.",
-                                            commit.getChangeSetId(), project.getKey()));
-                                }
-                            } else {
-                                logger.error(String.format("Unable to auto-create review for changeset %s. " +
-                                        "No projects found that bind to repository %s.",
-                                        commit.getChangeSetId(), commit.getRepositoryName()));
-                            }
-                            return null;
-                        }
-                    });
+                impersonator.doAsUser(null, config.loadRunAsUser(), new CommitHandler(commit));
             } catch (Exception e) {
                 logger.error(String.format("Unable to auto-create " +
                         "review for changeset %s: %s.",
@@ -126,116 +96,201 @@ public class CommitListener implements EventListener {
         }
     }
 
+
     /**
-     * Determines whether or not the user that made the commit is exempt from
-     * automatic reviews, or whether the user is on the list of always having
-     * its commits automatically reviewed.
-     *
-     * @param committer the username that made the commit (the system will use
-     * the committer mapping information to find the associated Crucible user)
-     * @return
+     * TODO: doc me
      */
-    protected boolean isUnderScrutiny(String committer) {
+    public class CommitHandler implements Operation<Void, ServerException> {
 
-        final UserData crucibleUser = committerToCrucibleUser.get().get(committer);
-        final boolean userInList = crucibleUser != null &&
-                config.loadCrucibleUserNames().contains(crucibleUser.getUserName());
-        final boolean userInGroups = crucibleUser != null &&
-                Iterables.any(config.loadCrucibleGroups(), new Predicate<String>() {
-                    public boolean apply(String group) {
-                        return userManager.isUserInGroup(crucibleUser.getUserName(), group);
-                    }
-                });
+        private final CommitEvent commit;
+        private final Map<String,ExpressionReviewConfig> expressionConfigMap;
+        private final ChangesetDataFE changeSet;
+        private final Map<String, ProjectData> projectsByKey;
 
-        switch (config.loadCreateMode()) {
-            case ALWAYS:
-                return !(userInList || userInGroups);
-            case NEVER:
-                return userInList || userInGroups;
-            default:
-                throw new AssertionError("Unsupported create mode");
+        // lame optimization used to reduce expensive fetching of user data
+        private String mruRepoKey = null;
+
+        public CommitHandler(CommitEvent commit) {
+            this.commit = commit;
+            expressionConfigMap = config.loadExpressionConfigMap(); // Never null
+            changeSet = revisionService.getChangeset(
+                    commit.getRepositoryName(), commit.getChangeSetId());
+
+            // get the projects that we might need
+            projectsByKey = getEnabledProjectsMap(
+                    commit.getRepositoryName(), expressionConfigMap);
+
         }
-    }
 
-    /**
-     * Attempts to add the change set to an existing open review by scanning
-     * the commit message for review IDs in the current project. When multiple
-     * IDs are found, the first non-closed review is used.
-     *
-     * @param repoKey
-     * @param cs
-     * @param project
-     * @return  {@code true} if the change set was successfully added to an
-     * existing review, {@code false} otherwise.
-     */
-    private boolean appendToReview(final String repoKey, final ChangesetDataFE cs, final ProjectData project) {
-
-        final ReviewData review = getFirstOpenReview(Utils.extractReviewIds(cs.getComment(), project.getKey()));
-
-        if (review != null) {
-
-            // impersonate the review's moderator (or creator if there is no moderator set):
-            return impersonator.doAsUser(null,
-                    Utils.defaultIfNull(review.getModerator(), review.getCreator()).getUserName(),
-                    new Operation<Boolean, RuntimeException>() {
-
-                public Boolean perform() throws RuntimeException {
-
-                    try {
-                        reviewService.addChangesetsToReview(review.getPermaId(), repoKey, Collections.singletonList(new ChangesetData(cs.getCsid())));
-                        addComment(review, String.format(
-                                "The Automatic Review Creator Plugin added changeset {cs:id=%s|rep=%s} to this review.",
-                                cs.getCsid(), repoKey));
-                        return true;
-                    } catch (Exception e) {
-                        logger.warn(String.format("Error appending changeset %s to review %s: %s",
-                                cs.getCsid(), review.getPermaId().getId(), e.getMessage()), e);
-                    }
-                    return false;
+        public Void perform() throws ServerException {
+            for (Map.Entry<String,ExpressionReviewConfig> expressionConfigEntry : expressionConfigMap.entrySet()) {
+                // We do not want to create reviews using the prototype config
+                if (!ConfigurationManager.CONFIG_PROTOTYPE_KEY.equals(expressionConfigEntry.getKey())) {
+                    ExpressionReviewConfig expressionReviewConfig = expressionConfigEntry.getValue();
+                    createReviewIfMatch(expressionReviewConfig);
                 }
-            });
+            }
+
+            return null;
         }
-        return false;
-    }
 
-    /**
-     * Note that this check is broken in Crucible older than 2.2. In 2.1, the
-     * review state gets stale and won't always show the current state.
-     * See: http://jira.atlassian.com/browse/CRUC-2912
-     *
-     * @param reviewIds
-     * @return
-     */
-    private ReviewData getFirstOpenReview(Iterable<String> reviewIds) {
+        private void createReviewIfMatch(ExpressionReviewConfig expressionReviewConfig) throws ServerException {
+            List<String> enabledForProjectKeys =
+                    Utils.firstNotNull(expressionReviewConfig.getEnabledForProjectKeys(), Collections.<String>emptyList());
 
-        final Collection<ReviewData.State> acceptableStates = ImmutableSet.of(
-                ReviewData.State.Draft,
-                ReviewData.State.Approval,
-                ReviewData.State.Review);
+            // check that each ExpressionReviewConfig has a project in this repo before testing against it
 
-        for (String reviewId : reviewIds) {
-            try {
-                final ReviewData review = reviewService.getReview(new PermId<ReviewData>(reviewId), false);
-                if (acceptableStates.contains(review.getState())) {
-                    return review;
+            ProjectData firstMatchedProjectInRepo = null;
+            // get the first relevant project from the config
+            for (String projectKey : enabledForProjectKeys) {
+                if (projectsByKey.containsKey(projectKey)) {
+                    firstMatchedProjectInRepo = projectsByKey.get(projectKey);
+                    break;
                 }
-            } catch (NotFoundException nfe) {
-                /* Exceptions for flow control is bad practice, but the API
-                 * has no exists() method.
-                 */
+            }
+
+            if (firstMatchedProjectInRepo != null) {
+                List<FileRevisionKeyData> fileRevisionKeyData = changeSet.getFileRevisions();
+
+                // test against the ExpressionReviewConfig
+                List<String> expressionMatches = determineExpressionMatches(fileRevisionKeyData, expressionReviewConfig);
+
+                if (expressionMatches.size() > 0) { // vvv do we use this mapping anywhere?
+                    String repoKey = firstMatchedProjectInRepo.getDefaultRepositoryName();
+
+                    // loading the committer mappings is heavyweight, so don't re-load them for the same repo twice
+                    // in a row
+                    if (!repoKey.equals(mruRepoKey)) {
+                        mruRepoKey = repoKey;
+                        committerToCrucibleUser.set(loadCommitterMappings(repoKey));
+                    }
+
+                    createReview(commit.getRepositoryName(), changeSet, firstMatchedProjectInRepo, expressionReviewConfig, expressionMatches);
+                } else {
+                    logger.info(String.format("Not creating a review for changeset %s.",
+                            commit.getChangeSetId()));
+                }
             }
         }
-        return null;
-    }
+
+        /**
+         * Find any files that are matched by this expressionReviewConfig
+         */
+        private List<String> determineExpressionMatches(List<FileRevisionKeyData> fileRevisionKeyData,
+                                                        ExpressionReviewConfig expressionReviewConfig) {
+            List<String> expressionMatches = new ArrayList<String>();
+            for (FileRevisionKeyData fileRevisionKeyDatum : fileRevisionKeyData) {
+                String filePath = fileRevisionKeyDatum.getPath();
+                boolean enabledForBranch = isEnabledForPathPrefix(expressionReviewConfig, filePath);
+
+                for (String expression : expressionReviewConfig.getFileNameExpressions()) {
+
+                    if (enabledForBranch && Pattern.matches(expression, filePath)) {
+                        expressionMatches.add(expression +" : "+ filePath );
+                    }
+                }
+            }
+            return expressionMatches;
+        }
+
+        private boolean isEnabledForPathPrefix(ExpressionReviewConfig expressionReviewConfig, String filePath) {
+            // check that the file is in an enabled branch
+            boolean enabledForPathPrefix = false;
+            List<String> enabledForBranchPrefixes = expressionReviewConfig.getEnabledForPathPrefixes();
+            for (String enabledForBranchPrefix : enabledForBranchPrefixes) {
+                if (filePath.startsWith(enabledForBranchPrefix)) {
+                    enabledForPathPrefix = true;
+                    break;
+                }
+            }
+            return enabledForPathPrefix;
+        }
+
+    } // End commit handler inner class
+
+
+    // Not used, but similar functionality may be wanted some day
+//    /**
+//     * Attempts to add the change set to an existing open review by scanning
+//     * the commit message for review IDs in the current project. When multiple
+//     * IDs are found, the first non-closed review is used.
+//     *
+//     * @param repoKey
+//     * @param cs
+//     * @param project
+//     * @return  {@code true} if the change set was successfully added to an
+//     * existing review, {@code false} otherwise.
+//     */
+//    private boolean appendToReview(final String repoKey, final ChangesetDataFE cs, final ProjectData project) {
+//
+//        final ReviewData review = getFirstOpenReview(Utils.extractReviewIds(cs.getComment(), project.getKey()));
+//
+//        if (review != null) {
+//
+//            // impersonate the review's moderator (or creator if there is no moderator set):
+//            return impersonator.doAsUser(null,
+//                    Utils.defaultIfNull(review.getModerator(), review.getCreator()).getUserName(),
+//                    new Operation<Boolean, RuntimeException>() {
+//
+//                        public Boolean perform() throws RuntimeException {
+//
+//                            try {
+//                                reviewService.addChangesetsToReview(review.getPermaId(), repoKey, Collections.singletonList(new ChangesetData(cs.getCsid())));
+//                                addComment(review, String.format(
+//                                        "The Automatic Review Creator Plugin added changeset {cs:id=%s|rep=%s} to this review.",
+//                                        cs.getCsid(), repoKey));
+//                                return true;
+//                            } catch (Exception e) {
+//                                logger.warn(String.format("Error appending changeset %s to review %s: %s",
+//                                        cs.getCsid(), review.getPermaId().getId(), e.getMessage()), e);
+//                            }
+//                            return false;
+//                        }
+//                    });
+//        }
+//        return false;
+//    }
+
+    // not used
+//    /**
+//     * Note that this check is broken in Crucible older than 2.2. In 2.1, the
+//     * review state gets stale and won't always show the current state.
+//     * See: http://jira.atlassian.com/browse/CRUC-2912
+//     *
+//     * @param reviewIds
+//     * @return
+//     */
+//    private ReviewData getFirstOpenReview(Iterable<String> reviewIds) {
+//
+//        final Collection<ReviewData.State> acceptableStates = ImmutableSet.of(
+//                ReviewData.State.Draft,
+//                ReviewData.State.Approval,
+//                ReviewData.State.Review);
+//
+//        for (String reviewId : reviewIds) {
+//            try {
+//                final ReviewData review = reviewService.getReview(new PermId<ReviewData>(reviewId), false);
+//                if (acceptableStates.contains(review.getState())) {
+//                    return review;
+//                }
+//            } catch (NotFoundException nfe) {
+//                /* Exceptions for flow control is bad practice, but the API
+//                 * has no exists() method.
+//                 */
+//            }
+//        }
+//        return null;
+//    }
 
     private void createReview(final String repoKey, final ChangesetDataFE cs,
-                              final ProjectData project)
+                              final ProjectData project, final ExpressionReviewConfig expressionReviewConfig,
+                              List<String> expressionMatches)
             throws ServerException {
 
-        final ReviewData template = buildReviewTemplate(cs, project);
+        final ReviewData template = buildReviewTemplate(cs, project, expressionReviewConfig, expressionMatches);
 
         // switch to user moderator:
-        impersonator.doAsUser(null, project.getDefaultModerator(), new Operation<Void, ServerException>() {
+        impersonator.doAsUser(null, template.getModerator().getUserName(), new Operation<Void, ServerException>() {
             public Void perform() throws ServerException {
 
                 // create a new review:
@@ -245,7 +300,7 @@ public class CommitListener implements EventListener {
                         Collections.singletonList(new ChangesetData(cs.getCsid())));
 
                 // add the project's default reviewers:
-                addReviewers(review, project);
+                addReviewers(review, expressionReviewConfig);
 
                 // start the review, so everyone is notified:
                 reviewService.changeState(review.getPermaId(), "action:approveReview");
@@ -282,25 +337,31 @@ public class CommitListener implements EventListener {
         }
     }
 
-    private void addReviewers(ReviewData review, ProjectData project) {
-        final List<String> reviewers = project.getDefaultReviewerUsers();
-        if (reviewers != null && !reviewers.isEmpty()) {
+    private void addReviewers(ReviewData review, ExpressionReviewConfig expressionReviewConfig) {
+        final List<String> reviewers = expressionReviewConfig.getUserReviewers();
+        List<String> validatedReviewers = new ArrayList<String>(reviewers.size());
+        // filter out invalid users
+        for (String reviewer : reviewers) {
+            // not sure if the service will puke on invalid users, or just return null.
+            try {
+                UserData user = userService.getUser(reviewer);
+                if (user != null &&
+                        !user.equals(review.getModerator()) &&
+                        !user.equals(review.getAuthor())) {
+                    // it's invalid for the author or moderator to also be a reviewer
+                    validatedReviewers.add(reviewer);
+                }
+            } catch (ServerException e) {
+                // assume this means an invalid user
+            }
+        }
+        if (validatedReviewers != null && !validatedReviewers.isEmpty()) {
             reviewService.addReviewers(review.getPermaId(),
-                    reviewers.toArray(new String[reviewers.size()]));
+                    validatedReviewers.toArray(new String[validatedReviewers.size()]));
         }
     }
 
-    /**
-     * <p>
-     * This method must be invoked with admin permissions.
-     * </p>
-     *
-     * @param cs
-     * @param project
-     * @return
-     * @throws ServerException
-     */
-    private ReviewData buildReviewTemplate(ChangesetDataFE cs, ProjectData project)
+    private ReviewData buildReviewTemplate(ChangesetDataFE cs, ProjectData project, ExpressionReviewConfig expressionReviewConfig, List<String> expressionMatches)
             throws ServerException {
 
         final UserData creator = committerToCrucibleUser.get().get(cs.getAuthor()) == null ?
@@ -309,49 +370,75 @@ public class CommitListener implements EventListener {
         final Date dueDate = project.getDefaultDuration() == null ? null :
                 DateHelper.addWorkingDays(new Date(), project.getDefaultDuration());
 
+        //cs.getAuthor();
+
+        String reviewName = expressionReviewConfig.getReviewSubjectPrefix() +" ("+ Utils.firstNonEmptyLine(cs.getComment()) +")";
+
+        StringBuilder reviewDescriptionBuilder = new StringBuilder();
+        reviewDescriptionBuilder.append(StringUtils.defaultIfEmpty(expressionReviewConfig.getReviewDescription(), cs.getComment()));
+        reviewDescriptionBuilder.append("\n\n");
+        reviewDescriptionBuilder.append("EXPRESSION : MATCHED FILE\n\n");
+        for (String expressionMatch : expressionMatches) {
+            reviewDescriptionBuilder.append(expressionMatch);
+            reviewDescriptionBuilder.append('\n');
+        }
+
+        UserData moderator = creator;
+        if (!StringUtils.isEmpty(project.getDefaultModerator())) {
+            moderator = userService.getUser(project.getDefaultModerator());
+        }
+
         return new ReviewDataBuilder()
                 .setProjectKey(project.getKey())
-                .setName(Utils.firstNonEmptyLine(cs.getComment()))
-                .setDescription(StringUtils.defaultIfEmpty(project.getDefaultObjectives(), cs.getComment()))
+                .setName(reviewName)
+                .setDescription(reviewDescriptionBuilder.toString())
                 .setAuthor(creator)
-                .setModerator(userService.getUser(project.getDefaultModerator()))
+                .setModerator(moderator)
                 .setCreator(creator)
-                .setAllowReviewersToJoin(project.isAllowReviewersToJoin())
+                        // TODO: try this again?
+//                .setAllowReviewersToJoin(project.isAllowReviewersToJoin())  // << this caused an exception in Atlassian code :-(
                 .setDueDate(dueDate)
                 .build();
     }
 
+
     /**
      * <p>
-     * Given a FishEye repository key, returns the Crucible project that has
-     * this repository configured as its default.
-     * </p>
-     * <p>
-     * When no project is bound to the specified repository, or not enabled
-     * for automatic review creation, <code>null</code> is returned.
+     * Given a FishEye repository key, returns a Map whose values are all the Crucible projects that
+     * have expression reviews enabled for them, and whose keys are the project keys.
      * </p>
      * <p>
      * This method must be invoked with admin permissions.
      * </p>
      *
-     * TODO: What to do when there are multiple projects?
-     *
-     * @param repoKey   a FishEye repository key (e.g. "CR").
-     * @return  the Crucible project that has the specified repository
-     *  configured as its default repo and has been enabled for automatic
-     *  review creation.
+     * @param repoKey a FishEye repository key (e.g. "CR").
+     * @param expressionReviewConfigMap the map of {@link com.atlassian.example.reviewcreator.ExpressionReviewConfig}s
+     * @return  A map from project key to {@link com.atlassian.crucible.spi.data.ProjectData} for all "enabled" projects
+     * within the repository with the given key.
      */
-    private ProjectData getEnabledProjectForRepository(String repoKey) {
+    private Map<String, ProjectData> getEnabledProjectsMap(String repoKey, Map<String, ExpressionReviewConfig> expressionReviewConfigMap) {
+        Map<String, ProjectData> results = new HashMap<String, ProjectData>();
 
-        final List<ProjectData> projects = projectService.getAllProjects();
-        final List<String> enabled = config.loadEnabledProjects();
-        for (ProjectData project : projects) {
-            if (repoKey.equals(project.getDefaultRepositoryName()) &&
-                    enabled.contains(project.getKey())) {
-                return project;
+        final List<ProjectData> allProjects = projectService.getAllProjects();
+        final Set<String> enabled = new HashSet<String>();
+
+        for (Map.Entry<String,ExpressionReviewConfig> expressionReviewConfigEntry : expressionReviewConfigMap.entrySet() ) {
+            // ignore the config prototype settings, it shouldn't be considered since it is only used as a template
+            if (!ConfigurationManager.CONFIG_PROTOTYPE_KEY.equals(expressionReviewConfigEntry.getKey())) {
+                ExpressionReviewConfig expressionReviewConfig = expressionReviewConfigEntry.getValue();
+                List<String> enabledForProjectKeys = expressionReviewConfig.getEnabledForProjectKeys();
+
+                if (enabledForProjectKeys != null) { enabled.addAll(enabledForProjectKeys); }
             }
         }
-        return null;
+
+        for (ProjectData project : allProjects) {
+            if (repoKey.equals(project.getDefaultRepositoryName()) &&
+                    enabled.contains(project.getKey())) {
+                results.put(project.getKey(), project);
+            }
+        }
+        return results;
     }
 
     /**
@@ -381,8 +468,9 @@ public class CommitListener implements EventListener {
         }
         return committerToUser;
     }
-    
+
     private boolean isPluginEnabled() {
         return !StringUtils.isEmpty(config.loadRunAsUser());
     }
+
 }

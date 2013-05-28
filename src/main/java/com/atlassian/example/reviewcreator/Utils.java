@@ -29,6 +29,13 @@ public class Utils {
         }
     }
 
+    public static <E> E firstNotNull(E ... args) {
+        for (E e : args) {
+            if (e != null) return e;
+        }
+        return null;
+    }
+
     /**
      * Returns a distinct set of review ids, extracted from the specified commit
      * message.

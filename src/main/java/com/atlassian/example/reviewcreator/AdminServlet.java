@@ -1,48 +1,38 @@
 package com.atlassian.example.reviewcreator;
 
-import com.atlassian.crucible.spi.data.ProjectData;
-import com.atlassian.crucible.spi.services.ImpersonationService;
-import com.atlassian.crucible.spi.services.NotFoundException;
-import com.atlassian.crucible.spi.services.Operation;
-import com.atlassian.crucible.spi.services.ProjectService;
-import com.atlassian.crucible.spi.services.ServerException;
-import com.atlassian.crucible.spi.services.UserService;
+import com.atlassian.crucible.spi.services.*;
 import com.atlassian.fisheye.plugin.web.helpers.VelocityHelper;
 import com.google.common.base.Predicate;
 import com.google.common.collect.Collections2;
-import com.google.common.collect.Lists;
 import org.apache.commons.lang.StringUtils;
+import org.apache.log4j.Logger;
 
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.TreeSet;
+import java.util.*;
 
 public class AdminServlet extends HttpServlet {
+
+    private static final Logger LOG = Logger.getLogger(AdminServlet.class);
+
+    private static final String FEEDBACK_MESSAGE_PARM = "feedbackMessage";
 
     private final ProjectService projectService;
     private final ImpersonationService impersonator;
     private final UserService userService;
     private final VelocityHelper velocity;
     private final ConfigurationManager config;
+    // private final WebResourceManager webResourceManager;
 
     public AdminServlet(
             ConfigurationManager config,
             ProjectService projectService,
             ImpersonationService impersonator,
             UserService userService,
+            //WebResourceManager webResourceManager,
             VelocityHelper velocity) {
         
         this.projectService = projectService;
@@ -50,12 +40,15 @@ public class AdminServlet extends HttpServlet {
         this.userService = userService;
         this.velocity = velocity;
         this.config = config;
+        //this.webResourceManager = webResourceManager;
     }
 
     public void doGet(HttpServletRequest request, HttpServletResponse response)
             throws IOException {
 
         final Map<String, Object> params = new HashMap<String, Object>();
+
+//        params.put("webResourceManager", webResourceManager);
 
         final String username = config.loadRunAsUser();
         if (!StringUtils.isEmpty(username)) {
@@ -68,11 +61,27 @@ public class AdminServlet extends HttpServlet {
                 }
             });
 
+            Map<String,String> rawConfigMap = config.loadRawExpressionConfigMap();
+            params.put("rawConfigMap", rawConfigMap);
+            Map<String, ExpressionReviewConfig> configMap = config.loadExpressionConfigMap();
+            params.put("configMap", configMap);
+
+            String feedbackMessage = request.getParameter(FEEDBACK_MESSAGE_PARM);
+            if (!StringUtils.isEmpty(feedbackMessage)) {
+                params.put(FEEDBACK_MESSAGE_PARM, feedbackMessage.trim());
+            }
+
+            String editName = request.getParameter("editName");
+            if (!StringUtils.isEmpty(editName)) {
+                String editConfig = rawConfigMap.get(editName);
+                params.put("editName", editName);
+                params.put("editConfig", editConfig);
+            }
+            if ("true".equals(request.getParameter("editNew"))) {
+                params.put("editNew", "true");
+            }
+
             params.put("contextPath", request.getContextPath());
-            params.put("createMode", config.loadCreateMode().name());
-            params.put("committerNames", config.loadCrucibleUserNames());
-            params.put("groupNames", config.loadCrucibleGroups());
-            params.put("iterative", config.loadIterative());
             params.put("stringUtils", new StringUtils());
         }
 
@@ -84,38 +93,109 @@ public class AdminServlet extends HttpServlet {
     protected void doPost(final HttpServletRequest req, final HttpServletResponse resp)
             throws ServletException, IOException {
 
+        String submitType = req.getParameter("submit");
+        if ("save".equals(submitType)) {
+            handleSave(req, resp);
+        } else if ("edit".equals(submitType)) {
+            handleEdit(req, resp);
+        } else if ("new".equals(submitType)) {
+            handleNew(req, resp);
+        } else if ("delete".equals(submitType)) {
+            handleDelete(req, resp);
+        }
+    }
+
+    protected void postRedirect(final HttpServletResponse resp, String queryParameters) throws IOException {
+        if (StringUtils.isEmpty(queryParameters)) {
+            queryParameters = "";
+        }
+        resp.sendRedirect("./reviewcreatoradmin?" + queryParameters);
+    }
+
+    protected void handleSave(final HttpServletRequest req, final HttpServletResponse resp)
+            throws ServletException, IOException {
+        StringBuilder feedbackMessageBuilder = new StringBuilder();
+
         final String username = req.getParameter("username");
         config.storeRunAsUser(username);
 
-        final List<String> enabled = req.getParameterValues("enabled") == null ?
-                Collections.<String>emptyList() : Arrays.asList(req.getParameterValues("enabled"));
+        String newEditName = req.getParameter("newEditName");
+        String editConfig = req.getParameter("editConfig");
 
-        impersonator.doAsUser(null, username, new Operation<Void, RuntimeException>() {
-            public Void perform() throws RuntimeException {
-                final Set<Project> projects = new HashSet<Project>();
-                // TODO: use a google collections transformer
-                for (Project p : loadProjects()) {
-                    projects.add(new Project(p.getId(), p.getKey(), p.getName(), p.getModerator(), enabled.contains(p.getKey())));
+        if (!StringUtils.isEmpty(newEditName)) {
+            Map<String,String> rawConfig = config.loadRawExpressionConfigMap();
+            String oldEditName = req.getParameter("oldEditName");
+            if (!StringUtils.isEmpty(oldEditName) && !StringUtils.isEmpty(newEditName)) {
+                if (!oldEditName.trim().equals(newEditName.trim())) {
+                    rawConfig.remove(oldEditName.trim());
+                    feedbackMessageBuilder.append("Deleted configuration '");
+                    feedbackMessageBuilder.append(oldEditName);
+                    feedbackMessageBuilder.append("', ");
                 }
-                storeProjects(projects);
-
-                config.storeCreateMode(CreateMode.valueOf(
-                        Utils.defaultIfNull(req.getParameter("createMode"), CreateMode.ALWAYS.name())));
-
-                final String[] committerNames = StringUtils.split(req.getParameter("committerNames"), ",    \n\r");
-                config.storeCrucibleUserNames(committerNames == null ? Collections.<String>emptyList() :
-                        getValidatedUsernames(Lists.newArrayList(committerNames)));
-
-                final String[] groupNames = StringUtils.split(req.getParameter("groupNames"), ",    \n\r");
-                config.storeCrucibleGroups(groupNames == null ? Collections.<String>emptyList() :
-                        Lists.newArrayList(groupNames));
-
-                config.storeIterative(req.getParameter("iterative") != null);
-                return null;
             }
-        });
+            rawConfig.put(newEditName.trim(), (editConfig == null) ? null : editConfig.trim());
 
-        resp.sendRedirect("./reviewcreatoradmin");
+            try {
+                config.storeRawExpressionConfigMap(rawConfig);
+                feedbackMessageBuilder.append("Stored configuration '");
+                feedbackMessageBuilder.append(newEditName);
+                feedbackMessageBuilder.append("'");
+            } catch (Exception e) {
+                feedbackMessageBuilder.append("unable to store configuration '");
+                feedbackMessageBuilder.append(newEditName);
+                feedbackMessageBuilder.append("', invalid format?");
+            }
+
+        } else {
+            feedbackMessageBuilder.append("No named configuration to store");
+        }
+
+        postRedirect(resp, FEEDBACK_MESSAGE_PARM + "=" + feedbackMessageBuilder + "#mainButtons");
+    }
+
+    protected void handleDelete(final HttpServletRequest req, final HttpServletResponse resp)
+            throws ServletException, IOException {
+        StringBuilder requestParameters = new StringBuilder();
+
+        String selectedConfig = req.getParameter("selectedConfig");
+        if (!StringUtils.isEmpty(selectedConfig)) {
+            Map<String,String> rawConfigMap = config.loadRawExpressionConfigMap();
+            rawConfigMap.remove(selectedConfig.trim());
+            config.storeRawExpressionConfigMap(rawConfigMap);
+            requestParameters.append(FEEDBACK_MESSAGE_PARM+"=Deleted configuration '");
+            requestParameters.append(selectedConfig.trim());
+            requestParameters.append("'");
+        } else {
+            requestParameters.append(FEEDBACK_MESSAGE_PARM+"=No configuration selected");
+        }
+        requestParameters.append("#mainButtons");
+
+        postRedirect(resp, requestParameters.toString());
+    }
+
+    protected void handleNew(final HttpServletRequest req, final HttpServletResponse resp)
+            throws ServletException, IOException {
+
+        postRedirect(resp, "editNew=true" +"&"+ FEEDBACK_MESSAGE_PARM +
+                "=Template configuration loaded, give it a name and save it" +
+                "#mainButtons");
+    }
+
+    protected void handleEdit(final HttpServletRequest req, final HttpServletResponse resp)
+            throws ServletException, IOException {
+        StringBuilder requestParameters = new StringBuilder();
+
+        String selectedConfig = req.getParameter("selectedConfig");
+        if (!StringUtils.isEmpty(selectedConfig)) {
+            requestParameters.append("editName=");
+            requestParameters.append(selectedConfig.trim());
+            requestParameters.append("&"+FEEDBACK_MESSAGE_PARM+"=Editing configuration '");
+            requestParameters.append(selectedConfig.trim());
+            requestParameters.append("'");
+            requestParameters.append("#mainButtons");
+        }
+
+        postRedirect(resp, requestParameters.toString());
     }
 
     /**
@@ -152,17 +232,18 @@ public class AdminServlet extends HttpServlet {
      */
     private Set<Project> loadProjects() {
 
-        final List<String> enabledKeys = config.loadEnabledProjects();
-
-        final Set<Project> projects = new TreeSet<Project>(new Comparator<Project>() {
-            public int compare(Project p1, Project p2) {
-                return p1.getKey().compareTo(p2.getKey());
-            }
-        });
-        for (ProjectData p : projectService.getAllProjects()) {
-            projects.add(new Project(p.getId(), p.getKey(), p.getName(), p.getDefaultModerator(), enabledKeys.contains(p.getKey())));
-        }
-        return projects;
+//        final List<String> enabledKeys = config.loadEnabledProjects();
+//
+//        final Set<Project> projects = new TreeSet<Project>(new Comparator<Project>() {
+//            public int compare(Project p1, Project p2) {
+//                return p1.getKey().compareTo(p2.getKey());
+//            }
+//        });
+//        for (ProjectData p : projectService.getAllProjects()) {
+//            projects.add(new Project(p.getId(), p.getKey(), p.getName(), p.getDefaultModerator(), enabledKeys.contains(p.getKey())));
+//        }
+//        return projects;
+        return Collections.emptySet();
     }
 
     /**
@@ -178,6 +259,6 @@ public class AdminServlet extends HttpServlet {
                 enabled.add(p.getKey());
             }
         }
-        config.storeEnabledProjects(enabled);
+//        config.storeEnabledProjects(enabled);
     }
 }

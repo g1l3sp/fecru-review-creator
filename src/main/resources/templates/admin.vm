@@ -1,10 +1,27 @@
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-    <title>Automatic Review Creation for New Commits</title>
+    <title>Automatic review creation based on commit Path</title>
+
+    <!-- #* -->
+    <link href="lib/bootstrap/css/bootstrap.min.css" rel="stylesheet" media="screen">
+    <!-- *# -->
+
+    <!-- lazy override of the bootstrap default -->
+    <style type="text/css">
+        div {
+            font-size: 13px;
+        }
+    </style>
+
+#* <!-- *#
+    <link href="/download/resources/com.atlassian.plugins.reviewcreator/lib/bootstrap/css/bootstrap.min.css" rel="stylesheet" media="screen">
+#* --> *#
+
     <meta name="decorator" content="atl.admin"/>
-    <meta name="admin.sectionName" content="Automatic Review Creation"/>
+    <meta name="admin.sectionName" content="Path Based Review Creation"/>
+
 </head>
-<body>
 <form method="post">
     <table class="adminTable">
         <tbody>
@@ -12,13 +29,13 @@
                 <td>
                     <p>
                     This plugin subscribes to commit events and creates a review for
-                    each commit.
+                    each commit whose path matches an expression.
                     </p>
-                    <p>
+                    <!-- p>
                     Auto review creation can be enabled/disabled on a
                     per-project basis. Enabled projects must be bound to a FishEye repository
                     and must have a default Moderator configured in the admin section.
-                    </p>
+                    </p -->
                     <p>
                         Run plugin as user (not used as review moderator):
                         <input type="text" size="15" name="username" value="#if ($username)$username#end"/>
@@ -27,94 +44,130 @@
             </tr>
         </tbody>
     </table>
-    #if ($username)
-    <table class="adminTable sortable">
-        <thead>
-        <th>Enabled</th>
-        <th>Project</th>
-        <th>Project Name</th>
-        <th>Review Moderator</th>
-        </thead>
-        <tbody>
-        #foreach ($project in $projects)
-        <tr>
-            <td>
-                <input type="checkbox" name="enabled" value="$project.Key"#if ($project.Enabled) checked="true"#end/>
-            </td>
-            <td>
-                $project.Key
-            </td>
-            <td>
-                $project.Name
-            </td>
-            <td>
-            #if ($stringUtils.isEmpty($project.moderator))
-                <span title="Automatic review creation for this project will not work without a moderator." style="color: DarkRed">
-                    No moderator set. <a href="${contextPath}/admin/editProject.do?id=$project.id">[Specify one now]</a></span>
-            #else
-                $project.moderator
-            #end
-            </td>
-        </tr>
-        #end
-        </tbody>
-    </table>
+#if ($username)
+    <br>
+    <a href="#mainButtons">&darr; jump to controls &darr;</a>
 
-    <table class="adminTable">
+        <table class="adminTable sortable" style="border-collapse: collapse;">
+
         <thead>
-            <th colspan="2">Configuration</th>
+        <th>&nbsp;</th>
+        <th>Configurations</th>
         </thead>
         <tbody>
+
+
+            #foreach ($configEntry in $configMap.entrySet())
+                #set( $name = $configEntry.getKey() )
+                #set( $config = $configEntry.getValue() )
+                #if (!$name.equals("CONFIG_PROTOTYPE"))
             <tr>
-                <td colspan="2">
-                    <select name="createMode">
-                        ## these strings MUST represent the CreateMode enum's string values:
-                        <option value="ALWAYS"#if ($createMode == "ALWAYS") selected="selected"#end>Always</option>
-                        <option value="NEVER"#if ($createMode == "NEVER") selected="selected"#end>Never</option>
-                    </select>
-                    create reviews automatically, except for:
+                <td style="vertical-align: top; border-top: .1em solid darkslategray;">
+                    <div style="padding: .75em; padding-top: 1.15em;"><input type="radio" name="selectedConfig" value="${name}"/></div>
+                </td>
+                <td style="border-top: .1em solid darkslategray; padding-bottom: 1.25em; padding-top: .75em;">
+    <!--
+    private String reviewSubjectPrefix;
+    private String reviewDescription;
+    private List<String> fileNameExpressions;
+    private List<String> enabledForProjectKeys;
+    private List<String> enabledForPathPrefixes;
+    private List<String> userReviewers;
+    private List<String> groupReviewers;
+    -->
+                    <div style="margin-bottom: 1em;">
+                    <div><h4>${name}</h4>
+                    </div>
+
+                    <div style="border: .1em solid lightblue; padding-left: .2em; padding-right: .2em; margin-top: .75em;">
+                        <div><b>Email</b><br>Subject: $config.reviewSubjectPrefix</div>
+                        <div><div>Body:</div> <div>$config.reviewDescription</div></div>
+                    </div>
+<div style="margin-top: .75em;"><b>Enabled for Path Prefixes</b>:
+    <ul>
+        #foreach ($pathPrefix in $config.enabledForPathPrefixes)
+            <li>$pathPrefix</li>
+        #end
+    </ul>
+</div>
+<div style="margin-top: .75em;"><b>Expressions</b>:
+    <ul>
+        #foreach ($expression in $config.fileNameExpressions)
+            <li>$expression</li>
+        #end
+    </ul>
+</div>
+
+<div style="margin-top: .75em;">
+    <b>Project Keys</b>: #foreach ($projectKey in $config.enabledForProjectKeys)$projectKey #end
+</div>
+
+<div>
+  #if ($config.userReviewers && $config.userReviewers.size() > 0)
+  <h5>User reviewers</h5>
+    <ul class="inline">
+        #foreach ($userReviewer in $config.userReviewers)
+            <li>$userReviewer</li>
+        #end
+    </ul>
+  #end
+  #if ($config.groupReviewers && $config.groupReviewers.size() > 0)
+  <h5>Group reviewers</h5>
+    <ul class="inline">
+        #foreach ($groupReviewer in $config.groupReviewers)
+            <li>$groupReviewer</li>
+        #end
+    </ul>
+  #end
+</div>
+                    </div>
                 </td>
             </tr>
-            <tr>
-                <td>
-                    commits made by users:
-                </td>
-                <td>
-                    <textarea title="Invalid usernames are dropped. Use commas, whitespace and/or newlines as separators."
-                              name="committerNames">$stringUtils.join($committerNames, ", ")</textarea><br>
-                    (comma-separated list of <em>Crucible</em> usernames)
-                </td>
-            </tr>
-            <tr>
-                <td>
-                    or users in groups:
-                </td>
-                <td>
-                    <textarea title="Group names are not validated. Use commas, whitespace and/or newlines as separators."
-                              name="groupNames">$stringUtils.join($groupNames, ", ")</textarea><br>
-                    (comma-separated list of groups)
-                </td>
-            </tr>
-            <tr>
-                <td colspan="2">
-                    <hr>
-                </td>
-            </tr>
-            <tr>
-                <td>
-                    <input type="checkbox" id="iterative" name="iterative"#if($iterative) checked="true"#end>
-                    <label for="iterative" title="Automatically add commits to the review that is mentioned in the commit message (instead of always creating a new review).">
-                        Enable iterative reviews</label>
-                </td>
-            </tr>
+                #end
+            #end
+
         </tbody>
     </table>
+<br>
+    <p id="mainButtons" style="margin-bottom: 1em;">
+        <input type="submit" name="submit" value="edit"/>
+        <input type="submit" name="submit" value="new"/>
+        <input type="submit" name="submit" value="delete"/>
+    </p>
+    #if ($feedbackMessage)
+        <div class="alert alert-info" style="display: inline; margin: 2em;">$feedbackMessage</div>
+    #end
+    #if ($editName || $editNew)
+    <div id="configEditor" style="background-color: lightblue; padding-left: .2em; padding-right: .2em;"><h2>Configuration Editor</h2>
+        <div><input type="submit" name="submit" value="save"/></div>
+        <div><label>Name</label><div>
+            <input name="newEditName" type="text" class="input-xlarge"
+                #if ($editName.equals("CONFIG_PROTOTYPE")) readonly #end
+                   value="#if ($editName)$editName#end"/>
+            #if ($editName)
+                    <input name="oldEditName" type="hidden" value="$editName"/>
+            #end
+        </div></div>
+        <div><label>Details</label>
+            <div>
+                <textarea name="editConfig" cols="120" rows="16" class="span12">#if ($editConfig)$editConfig#else$rawConfigMap.get("CONFIG_PROTOTYPE")#end</textarea>
+            </div>
+        </div>
+    </div>
+    #end
     #else
     <p style="color: DarkRed">Specify a valid (admin) user for this plugin to run as.</p>
     #end
-    <p>
-        <input type="submit" value="save"/>
-    </p>
 </form>
+
+#* <!-- *#
+<script src="/download/resources/com.atlassian.plugins.reviewcreator/lib/bootstrap/js/bootstrap.min.js"></script>
+#* --> *#
+
+<!-- #* -->
+    <script src="lib/bootstrap/js/bootstrap.min.js"></script>
+<!-- *# -->
+
+
 </body>
 </html>

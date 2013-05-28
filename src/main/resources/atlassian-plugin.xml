@@ -37,4 +37,7 @@
         <description>Configuration for Automatic Review Creation</description>
         <url-pattern>/reviewcreatoradmin</url-pattern>
     </servlet>
+
+    <resource type="download" name="lib/" location="templates/lib/"/>
+
 </atlassian-plugin>
