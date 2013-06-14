@@ -6,6 +6,7 @@ import com.google.common.base.Predicate;
 import com.google.common.collect.Collections2;
 import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
+import org.apache.velocity.app.FieldMethodizer;
 
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServlet;
@@ -19,6 +20,7 @@ public class AdminServlet extends HttpServlet {
     private static final Logger LOG = Logger.getLogger(AdminServlet.class);
 
     private static final String FEEDBACK_MESSAGE_PARM = "feedbackMessage";
+    public static final String MAIN_BUTTONS_ANCHOR = "#mainButtons";
 
     private final ProjectService projectService;
     private final ImpersonationService impersonator;
@@ -48,13 +50,16 @@ public class AdminServlet extends HttpServlet {
 
         final Map<String, Object> params = new HashMap<String, Object>();
 
+        // allow access to constants in AdminForm from our velocity template
+        params.put("adminForm", new FieldMethodizer(AdminForm.class.getName()));
+
 //        params.put("webResourceManager", webResourceManager);
 
-        final String username = config.loadRunAsUser();
-        if (!StringUtils.isEmpty(username)) {
-            params.put("username", username);
+        final String runAsUser = config.loadRunAsUser();
+        if (!StringUtils.isEmpty(runAsUser)) {
+            params.put(AdminForm.RUN_AS_USER, runAsUser);
 
-            impersonator.doAsUser(null, username, new Operation<Void, RuntimeException>() {
+            impersonator.doAsUser(null, runAsUser, new Operation<Void, RuntimeException>() {
                 public Void perform() throws RuntimeException {
                     params.put("projects", loadProjects());
                     return null;
@@ -69,6 +74,11 @@ public class AdminServlet extends HttpServlet {
             String feedbackMessage = request.getParameter(FEEDBACK_MESSAGE_PARM);
             if (!StringUtils.isEmpty(feedbackMessage)) {
                 params.put(FEEDBACK_MESSAGE_PARM, feedbackMessage.trim());
+            }
+
+            String editAsJsonValue = request.getParameter(AdminForm.EDIT_AS_JSON);
+            if (!StringUtils.isEmpty(editAsJsonValue)) {
+                params.put(AdminForm.EDIT_AS_JSON, editAsJsonValue);
             }
 
             String editName = request.getParameter("editName");
@@ -94,14 +104,21 @@ public class AdminServlet extends HttpServlet {
             throws ServletException, IOException {
 
         String submitType = req.getParameter("submit");
-        if ("save".equals(submitType)) {
+        if (AdminForm.SUBMIT_SAVE.equals(submitType)) {
             handleSave(req, resp);
-        } else if ("edit".equals(submitType)) {
+        } else if (AdminForm.SUBMIT_SAVE_JSON.equals(submitType)) {
+            handleSaveJson(req, resp);
+        } else if (AdminForm.SUBMIT_EDIT_JSON.equals(submitType)) {
+            handleEditJson(req, resp);
+        } else if (AdminForm.SUBMIT_EDIT.equals(submitType)) {
             handleEdit(req, resp);
-        } else if ("new".equals(submitType)) {
+        } else if (AdminForm.SUBMIT_NEW.equals(submitType)) {
             handleNew(req, resp);
-        } else if ("delete".equals(submitType)) {
+        } else if (AdminForm.SUBMIT_DELETE.equals(submitType)) {
             handleDelete(req, resp);
+        } else {
+            // no need to explicitly handle "cancel"
+            resp.sendRedirect("./reviewcreatoradmin");
         }
     }
 
@@ -116,15 +133,118 @@ public class AdminServlet extends HttpServlet {
             throws ServletException, IOException {
         StringBuilder feedbackMessageBuilder = new StringBuilder();
 
-        final String username = req.getParameter("username");
-        config.storeRunAsUser(username);
+        final String runAsUser = req.getParameter(AdminForm.RUN_AS_USER);
+        config.storeRunAsUser(runAsUser);
 
-        String newEditName = req.getParameter("newEditName");
-        String editConfig = req.getParameter("editConfig");
+        String newEditName = req.getParameter(AdminForm.NEW_EDIT_NAME);
+
+        if (newEditName != null) {
+            String editConfig = req.getParameter("editConfig");
+
+            // extract the expression review config from the form
+            ExpressionReviewConfig expressionReviewConfig = extractExpressionReviewConfig(req);
+
+            try {
+                // if the config is invalid, we'll bail and put a message together
+                expressionReviewConfig.validateConfig();
+
+                if (!StringUtils.isEmpty(newEditName)) {
+                    Map<String, ExpressionReviewConfig> configs = config.loadExpressionConfigMap();
+
+                    String oldEditName = req.getParameter(AdminForm.OLD_EDIT_NAME);
+                    if (!StringUtils.isEmpty(oldEditName) && !StringUtils.isEmpty(newEditName)) {
+                        if (!oldEditName.trim().equals(newEditName.trim())) {
+                            configs.remove(oldEditName.trim());
+                            feedbackMessageBuilder.append("Deleted configuration '");
+                            feedbackMessageBuilder.append(oldEditName);
+                            feedbackMessageBuilder.append("', ");
+                        }
+                    }
+                    configs.put(newEditName.trim(), expressionReviewConfig);
+
+                    try {
+                        config.storeExpressionConfigMap(configs);
+                        feedbackMessageBuilder.append("Stored configuration '");
+                        feedbackMessageBuilder.append(newEditName);
+                        feedbackMessageBuilder.append("'");
+                    } catch (Exception e) {
+                        feedbackMessageBuilder.append("unable to store configuration '");
+                        feedbackMessageBuilder.append(newEditName);
+                        feedbackMessageBuilder.append("', invalid format?");
+                    }
+
+                } else {
+                    feedbackMessageBuilder.append("No named configuration to store");
+                }
+
+            } catch (ExpressionReviewConfig.ReviewValidationException e) {
+                feedbackMessageBuilder.append("unable to store configuration '");
+                feedbackMessageBuilder.append(newEditName);
+                feedbackMessageBuilder.append("', ");
+                feedbackMessageBuilder.append(e.getReason());
+            }
+        }
+
+        postRedirect(resp, FEEDBACK_MESSAGE_PARM + "=" + feedbackMessageBuilder + MAIN_BUTTONS_ANCHOR);
+    }
+
+    /**
+     * Pull out form data into an ExpressionReviewConfig instance
+     *
+     * @param req the HttpServletRequest containing the form data
+     * @return the extracted ExpressionReviewConfig
+     */
+    private ExpressionReviewConfig extractExpressionReviewConfig(HttpServletRequest req) {
+        // Extract form data to ExpressionReviewConfig object
+        ExpressionReviewConfig expressionReviewConfig = new ExpressionReviewConfig();
+        expressionReviewConfig.setReviewSubjectPrefix(req.getParameter(AdminForm.REVIEW_SUBJECT_PREFIX));
+        expressionReviewConfig.setReviewDescription(req.getParameter(AdminForm.REVIEW_DESCRIPTION));
+
+        // extract indexed parameters
+        expressionReviewConfig.setEnabledForPathPrefixes(extractIndexedParameters(req, 0, 9, AdminForm.PATH_PREFIX));
+        expressionReviewConfig.setFileNameExpressions(extractIndexedParameters(req, 0, 9, AdminForm.EXPRESSION));
+        expressionReviewConfig.setEnabledForProjectKeys(extractIndexedParameters(req, 0, 9, AdminForm.ENABLED_FOR_PROJECT_KEY));
+        expressionReviewConfig.setUserReviewers(extractIndexedParameters(req, 0, 9, AdminForm.USER_REVIEWER));
+        expressionReviewConfig.setGroupReviewers(extractIndexedParameters(req, 0, 9, AdminForm.GROUP_REVIEWER));
+
+        return expressionReviewConfig;
+    }
+
+    /**
+     * Extracts to a list parameter values whose names follow the convention elementKeyPrefixN where N is an integer.
+     * The resulting list is the size of the number of non-blank elements extracted from the request, so the indices
+     * of list elements may not match the indices of the parameters they were extracted from!
+     *
+     * @param req the HttpServletRequest
+     * @param minIndex the minimum index to check
+     * @param maxIndex the maximum index to check
+     * @param elementKeyPrefix the parameter set prefix
+     * @return a list containing all the values for the indexed parameters.  Not guaranteed to be maxIndex-minIndex in size!
+     */
+    private List<String> extractIndexedParameters(HttpServletRequest req, int minIndex, int maxIndex, String elementKeyPrefix) {
+        List<String> elements = new ArrayList<String>(10);
+        for (int i=minIndex; i<=maxIndex; i++) {
+            String elementValue = req.getParameter(elementKeyPrefix + i);
+            if (!StringUtils.isEmpty(elementValue)) {
+                elements.add(elementValue);
+            }
+        }
+        return elements;
+    }
+
+    protected void handleSaveJson(final HttpServletRequest req, final HttpServletResponse resp)
+            throws ServletException, IOException {
+        StringBuilder feedbackMessageBuilder = new StringBuilder();
+
+        final String runAsUser = req.getParameter(AdminForm.RUN_AS_USER);
+        config.storeRunAsUser(runAsUser);
+
+        String newEditName = req.getParameter(AdminForm.NEW_EDIT_NAME);
+        String editConfig = req.getParameter(AdminForm.EDIT_CONFIG);
 
         if (!StringUtils.isEmpty(newEditName)) {
             Map<String,String> rawConfig = config.loadRawExpressionConfigMap();
-            String oldEditName = req.getParameter("oldEditName");
+            String oldEditName = req.getParameter(AdminForm.OLD_EDIT_NAME);
             if (!StringUtils.isEmpty(oldEditName) && !StringUtils.isEmpty(newEditName)) {
                 if (!oldEditName.trim().equals(newEditName.trim())) {
                     rawConfig.remove(oldEditName.trim());
@@ -150,14 +270,14 @@ public class AdminServlet extends HttpServlet {
             feedbackMessageBuilder.append("No named configuration to store");
         }
 
-        postRedirect(resp, FEEDBACK_MESSAGE_PARM + "=" + feedbackMessageBuilder + "#mainButtons");
+        postRedirect(resp, FEEDBACK_MESSAGE_PARM + "=" + feedbackMessageBuilder + MAIN_BUTTONS_ANCHOR);
     }
 
     protected void handleDelete(final HttpServletRequest req, final HttpServletResponse resp)
             throws ServletException, IOException {
         StringBuilder requestParameters = new StringBuilder();
 
-        String selectedConfig = req.getParameter("selectedConfig");
+        String selectedConfig = req.getParameter(AdminForm.SELECTED_CONFIG);
         if (!StringUtils.isEmpty(selectedConfig)) {
             Map<String,String> rawConfigMap = config.loadRawExpressionConfigMap();
             rawConfigMap.remove(selectedConfig.trim());
@@ -168,7 +288,7 @@ public class AdminServlet extends HttpServlet {
         } else {
             requestParameters.append(FEEDBACK_MESSAGE_PARM+"=No configuration selected");
         }
-        requestParameters.append("#mainButtons");
+        requestParameters.append(MAIN_BUTTONS_ANCHOR);
 
         postRedirect(resp, requestParameters.toString());
     }
@@ -178,21 +298,39 @@ public class AdminServlet extends HttpServlet {
 
         postRedirect(resp, "editNew=true" +"&"+ FEEDBACK_MESSAGE_PARM +
                 "=Template configuration loaded, give it a name and save it" +
-                "#mainButtons");
+                MAIN_BUTTONS_ANCHOR);
+    }
+
+    protected void handleEditJson(final HttpServletRequest req, final HttpServletResponse resp)
+            throws ServletException, IOException {
+        StringBuilder requestParameters = new StringBuilder();
+
+        String selectedConfig = req.getParameter(AdminForm.SELECTED_CONFIG);
+        if (!StringUtils.isEmpty(selectedConfig)) {
+            requestParameters.append("editAsJson=true");
+            requestParameters.append("&editName=");
+            requestParameters.append(selectedConfig.trim());
+            requestParameters.append("&"+FEEDBACK_MESSAGE_PARM+"=Editing configuration '");
+            requestParameters.append(selectedConfig.trim());
+            requestParameters.append("'");
+            requestParameters.append(MAIN_BUTTONS_ANCHOR);
+        }
+
+        postRedirect(resp, requestParameters.toString());
     }
 
     protected void handleEdit(final HttpServletRequest req, final HttpServletResponse resp)
             throws ServletException, IOException {
         StringBuilder requestParameters = new StringBuilder();
 
-        String selectedConfig = req.getParameter("selectedConfig");
+        String selectedConfig = req.getParameter(AdminForm.SELECTED_CONFIG);
         if (!StringUtils.isEmpty(selectedConfig)) {
             requestParameters.append("editName=");
             requestParameters.append(selectedConfig.trim());
             requestParameters.append("&"+FEEDBACK_MESSAGE_PARM+"=Editing configuration '");
             requestParameters.append(selectedConfig.trim());
             requestParameters.append("'");
-            requestParameters.append("#mainButtons");
+            requestParameters.append(MAIN_BUTTONS_ANCHOR);
         }
 
         postRedirect(resp, requestParameters.toString());

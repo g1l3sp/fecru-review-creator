@@ -3,9 +3,19 @@
 <head>
     <title>Automatic review creation based on commit Path</title>
 
+    <!-- using a commenting hack to enable scripts/css during direct file:// access via browser, but
+     disable the local path when velocity renders the page -->
+
     <!-- #* -->
+    <script src="lib/jquery/jquery.min.js"></script>
     <link href="lib/bootstrap/css/bootstrap.min.css" rel="stylesheet" media="screen">
     <!-- *# -->
+
+    #* <!-- *#
+    <script src="/download/resources/com.atlassian.plugins.reviewcreator/lib/jquery/jquery.min.js"></script>
+    <link href="/download/resources/com.atlassian.plugins.reviewcreator/lib/bootstrap/css/bootstrap.min.css" rel="stylesheet" media="screen">
+    #* --> *#
+
 
     <!-- lazy override of the bootstrap default -->
     <style type="text/css">
@@ -14,14 +24,12 @@
         }
     </style>
 
-#* <!-- *#
-    <link href="/download/resources/com.atlassian.plugins.reviewcreator/lib/bootstrap/css/bootstrap.min.css" rel="stylesheet" media="screen">
-#* --> *#
-
     <meta name="decorator" content="atl.admin"/>
     <meta name="admin.sectionName" content="Path Based Review Creation"/>
 
 </head>
+<body>
+#* @vtlvariable name="adminForm" type="com.atlassian.example.reviewcreator.AdminForm" *#
 <form method="post">
     <table class="adminTable">
         <tbody>
@@ -31,6 +39,7 @@
                     This plugin subscribes to commit events and creates a review for
                     each commit whose path matches an expression.
                     </p>
+
                     <!-- p>
                     Auto review creation can be enabled/disabled on a
                     per-project basis. Enabled projects must be bound to a FishEye repository
@@ -38,13 +47,21 @@
                     </p -->
                     <p>
                         Run plugin as user (not used as review moderator):
-                        <input type="text" size="15" name="username" value="#if ($username)$username#end"/>
+                        #if (!$editName && !$editNew) #* only have save button here if there isn't a configuration being authored *#
+                            <input type="text" size="15" name="$adminForm.RUN_AS_USER" value="#if ($runAsUser)$runAsUser#end"/>
+                            <input type="submit" name="submit" value="$adminForm.SUBMIT_SAVE"/>
+                        #else
+                            #if ($runAsUser)
+                                $runAsUser
+                                <input type="hidden" name="$adminForm.RUN_AS_USER" value="#if ($runAsUser)$runAsUser#end"/>
+                            #end
+                        #end
                     </p>
                 </td>
             </tr>
         </tbody>
     </table>
-#if ($username)
+#if ($runAsUser)
     <br>
     <a href="#mainButtons">&darr; jump to controls &darr;</a>
 
@@ -63,7 +80,7 @@
                 #if (!$name.equals("CONFIG_PROTOTYPE"))
             <tr>
                 <td style="vertical-align: top; border-top: .1em solid darkslategray;">
-                    <div style="padding: .75em; padding-top: 1.15em;"><input type="radio" name="selectedConfig" value="${name}"/></div>
+                    <div style="padding: .75em; padding-top: 1.15em;"><input type="radio" name="$adminForm.SELECTED_CONFIG" value="${name}"/></div>
                 </td>
                 <td style="border-top: .1em solid darkslategray; padding-bottom: 1.25em; padding-top: .75em;">
     <!--
@@ -80,8 +97,8 @@
                     </div>
 
                     <div style="border: .1em solid lightblue; padding-left: .2em; padding-right: .2em; margin-top: .75em;">
-                        <div><b>Email</b><br>Subject: $config.reviewSubjectPrefix</div>
-                        <div><div>Body:</div> <div>$config.reviewDescription</div></div>
+                        <div><b>Review Text</b><br><span style="color: #888">Subject:</span> $config.reviewSubjectPrefix</div>
+                        <div><span style="color: #888">Body:</span> <div>$config.reviewDescription</div></div>
                     </div>
 <div style="margin-top: .75em;"><b>Enabled for Path Prefixes</b>:
     <ul>
@@ -130,42 +147,161 @@
     </table>
 <br>
     <p id="mainButtons" style="margin-bottom: 1em;">
-        <input type="submit" name="submit" value="edit"/>
-        <input type="submit" name="submit" value="new"/>
-        <input type="submit" name="submit" value="delete"/>
+        <input type="submit" name="submit" value="$adminForm.SUBMIT_EDIT"/>
+        <input type="submit" name="submit" value="$adminForm.SUBMIT_EDIT_JSON"/>
+        <input type="submit" name="submit" value="$adminForm.SUBMIT_NEW"/>
+        <input type="submit" name="submit" value="$adminForm.SUBMIT_DELETE"/>
     </p>
     #if ($feedbackMessage)
-        <div class="alert alert-info" style="display: inline; margin: 2em;">$feedbackMessage</div>
+        <div id="feedbackMessage" class="alert alert-info" style="display: inline; margin: 2em;">$feedbackMessage</div>
     #end
     #if ($editName || $editNew)
-    <div id="configEditor" style="background-color: lightblue; padding-left: .2em; padding-right: .2em;"><h2>Configuration Editor</h2>
-        <div><input type="submit" name="submit" value="save"/></div>
-        <div><label>Name</label><div>
-            <input name="newEditName" type="text" class="input-xlarge"
-                #if ($editName.equals("CONFIG_PROTOTYPE")) readonly #end
-                   value="#if ($editName)$editName#end"/>
-            #if ($editName)
-                    <input name="oldEditName" type="hidden" value="$editName"/>
-            #end
-        </div></div>
-        <div><label>Details</label>
+        #if ($editAsJson)  #* --- compact json-style form --- *#
+
+        <div id="jsonConfigEditor" style="background-color: lightblue; padding-left: .2em; padding-right: .2em;"><h2>Configuration Editor</h2>
             <div>
-                <textarea name="editConfig" cols="120" rows="16" class="span12">#if ($editConfig)$editConfig#else$rawConfigMap.get("CONFIG_PROTOTYPE")#end</textarea>
+                <input type="submit" name="submit" value="$adminForm.SUBMIT_SAVE_JSON"/>
+                <input type="submit" name="submit" value="$adminForm.SUBMIT_CANCEL"/>
+            </div>
+            <div><label>Name</label><div>
+                <input name="$adminForm.NEW_EDIT_NAME" type="text" class="input-xlarge"
+                    #if ($editName.equals("CONFIG_PROTOTYPE")) readonly #end
+                       value="#if ($editName)$editName#end"/>
+                #if ($editName)
+                    <input name="$adminForm.OLD_EDIT_NAME" type="hidden" value="$editName"/>
+                #end
+            </div></div>
+            <div><label>Details</label>
+                <div>
+                    <textarea name="$adminForm.EDIT_CONFIG" cols="120" rows="16" class="span12">#if ($editConfig)$editConfig#else$rawConfigMap.get("CONFIG_PROTOTYPE")#end</textarea>
+                </div>
             </div>
         </div>
-    </div>
+
+
+        #else  #* --- regular edit form (non-json) --- *#
+
+
+        <div id="configEditor" style="border-top: 1px solid slategray; margin-top: 1em;">
+
+            #if ($editName)
+                #set( $config =  $configMap.get($editName) )
+            #else
+                #set( $config = false )
+            #end
+
+            <div><label>Name</label><div>
+                <input name="$adminForm.NEW_EDIT_NAME" type="text" class="input-xlarge"
+                    #if ($editName.equals("CONFIG_PROTOTYPE")) readonly #end
+                       value="#if ($editName)$editName#end"/>
+                #if ($editName)
+                    <input name="$adminForm.OLD_EDIT_NAME" type="hidden" value="$editName"/>
+                #end
+            </div></div>
+
+            <!--
+            private String reviewSubjectPrefix;
+            private String reviewDescription;
+            private List<String> fileNameExpressions;
+            private List<String> enabledForProjectKeys;
+            private List<String> enabledForPathPrefixes;
+            private List<String> userReviewers;
+            private List<String> groupReviewers;
+            -->
+            <div style="margin-bottom: 1em;">
+
+                <div style="border: .1em solid lightblue; padding-left: .2em; padding-right: .2em; margin-top: .75em;">
+                    <div><b>Review Text</b> - The subject and description that will be associated  with a generated review
+                        <br>Subject:
+                        <input name="$adminForm.REVIEW_SUBJECT_PREFIX" type="text" class="input-xlarge"
+                               value="#if ($config)$config.reviewSubjectPrefix#else$configMap.get("CONFIG_PROTOTYPE").ReviewSubjectPrefix#end"/>
+                    </div>
+                    <div><div>Description:</div>
+                        <div>
+                            <textarea name="$adminForm.REVIEW_DESCRIPTION" cols="120" rows="16" class="span12">#if ($config)$config.ReviewDescription#else$configMap.get("CONFIG_PROTOTYPE").ReviewDescription#end</textarea>
+                        </div>
+                    </div>
+                </div>
+                <div style="margin-top: .75em;"><b>Enabled for Path Prefixes</b>: only files in the commit with exact matches for a path prefix will be evaluated against file name expressions
+                    <ol>
+                        #foreach ($i in [0..9])
+                            <li>
+                                <input name="${adminForm.PATH_PREFIX}$i" type="text" class="span4"
+                                       value="#if ($config)#if ($config.EnabledForPathPrefixes.size() > $i)$config.EnabledForPathPrefixes.get($i)#end#else#if ($configMap.get("CONFIG_PROTOTYPE").EnabledForPathPrefixes.size() > $i)$configMap.get("CONFIG_PROTOTYPE").EnabledForPathPrefixes.get($i)#end#end"/>
+                            </li>
+                        #end
+                    </ol>
+                </div>
+                <div style="margin-top: .75em;"><b>Expressions (Regexp)</b>: for auto-reviews to be created, one or more files in the commit must exactly match a path prefix and be matched by an expression
+                    <ol>
+                        #foreach ($i in [0..9])
+                            <li>
+                                <input name="${adminForm.EXPRESSION}$i" type="text" class="span8"
+                                       value="#if ($config)#if ($config.FileNameExpressions.size() > $i)$config.FileNameExpressions.get($i)#end#else#if ($configMap.get("CONFIG_PROTOTYPE").FileNameExpressions.size() > $i)$configMap.get("CONFIG_PROTOTYPE").FileNameExpressions.get($i)#end#end"/>
+                            </li>
+                        #end
+                    </ol>
+                </div>
+
+                <div style="margin-top: .75em;">
+                    <b>Project Keys</b>: auto-reviews for this configuration are enabled within any projects listed below
+                    <ol class="inline">
+                        #foreach ($i in [0..4])
+                            <li>
+                                <input name="${adminForm.ENABLED_FOR_PROJECT_KEYS}$i" type="text" class="input-small"
+                                       value="#if ($config)#if ($config.EnabledForProjectKeys.size() > $i)$config.EnabledForProjectKeys.get($i)#end#else#if ($configMap.get("CONFIG_PROTOTYPE").EnabledForProjectKeys.size() > $i)$configMap.get("CONFIG_PROTOTYPE").EnabledForProjectKeys.get($i)#end#end"/>
+                            </li>
+                        #end
+                    </ol>
+                </div>
+
+                <div>
+                    <h5>User reviewers</h5> <p>These users will be added to the auto-created reviews</p>
+                    <ol class="inline">
+                        #foreach ($i in [0..4])
+                            <li>
+                                <input name="${adminForm.USER_REVIEWER}$i" type="text" class="input-small"
+                                       value="#if ($config)#if ($config.UserReviewers.size() > $i)$config.UserReviewers.get($i)#end#else#if ($configMap.get("CONFIG_PROTOTYPE").UserReviewers.size() > $i)$configMap.get("CONFIG_PROTOTYPE").UserReviewers.get($i)#end#end"/>
+                            </li>
+                        #end
+                    </ol>
+                    <h5>Group reviewers</h5> <p>These groups will be added to the auto-created reviews</p>
+                    <ol class="inline">
+                        #foreach ($i in [0..4])
+                            <li>
+                                <input name="${adminForm.GROUP_REVIEWER}$i" type="text" class="input-small"
+                                       value="#if ($config)#if ($config.GroupReviewers.size() > $i)$config.GroupReviewers.get($i)#end#else#if ($configMap.get("CONFIG_PROTOTYPE").GroupReviewers.size() > $i)$configMap.get("CONFIG_PROTOTYPE").GroupReviewers.get($i)#end#end"/>
+                            </li>
+                        #end
+                    </ol>
+                </div>
+            </div>
+
+            <div><input type="submit" name="submit" value="$adminForm.SUBMIT_SAVE"/> <input type="submit" name="submit" value="$adminForm.SUBMIT_CANCEL"/></div>
+
+        </div>
+        #end
     #end
     #else
     <p style="color: DarkRed">Specify a valid (admin) user for this plugin to run as.</p>
     #end
 </form>
 
+<br>
+
+
+
+<!-- using a commenting hack to enable scripts during direct file:// access via browser, but
+     disable the local paths when velocity renders the page -->
+
 #* <!-- *#
-<script src="/download/resources/com.atlassian.plugins.reviewcreator/lib/bootstrap/js/bootstrap.min.js"></script>
+    <script src="/download/resources/com.atlassian.plugins.reviewcreator/lib/bootstrap/js/bootstrap.min.js"></script>
+    <script src="/download/resources/com.atlassian.plugins.reviewcreator/lib/adminpage.js"></script>
 #* --> *#
 
 <!-- #* -->
     <script src="lib/bootstrap/js/bootstrap.min.js"></script>
+    <script src="lib/adminpage.js"></script>
 <!-- *# -->
 
 

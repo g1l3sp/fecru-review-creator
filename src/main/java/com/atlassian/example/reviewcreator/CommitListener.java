@@ -98,7 +98,7 @@ public class CommitListener implements EventListener {
 
 
     /**
-     * TODO: doc me
+     * Commit handling operation, used mainly to encapsulate the state needed for processing a single commit.
      */
     public class CommitHandler implements Operation<Void, ServerException> {
 
