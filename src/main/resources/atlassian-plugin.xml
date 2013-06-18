@@ -8,7 +8,7 @@
     </plugin-info>
 
     <!-- our crucible event listener -->
-    <listener key="commit-listener" class="com.atlassian.example.reviewcreator.CommitListener"/>
+    <listener key="commit-listener" class="org.kuali.crucible.plugin.reviewgenerator.CommitListener"/>
 
     <!-- persistence and group management provided by SAL -->
     <component-import key="pluginSettingsFactory"
@@ -18,24 +18,24 @@
 
     <!-- our Spring bean to manage config settings -->
     <component key="configurationManager"
-               class="com.atlassian.example.reviewcreator.ConfigurationManagerImpl"
+               class="org.kuali.crucible.plugin.reviewgenerator.ConfigurationManagerImpl"
                public="false">
         <description>Manages plugin settings serialization and persistence.</description>
-        <interface>com.atlassian.example.reviewcreator.ConfigurationManager</interface>
+        <interface>org.kuali.crucible.plugin.reviewgenerator.ConfigurationManager</interface>
     </component>
 
     <!-- the new menu entry in the admin screen -->
-    <web-item key="reviewcreatorwebitem" section="system.admin/system">
-        <link>/plugins/servlet/reviewcreatoradmin</link>
-        <label key="Auto Review Creation"/>
+    <web-item key="reviewgeneratorwebitem" section="system.admin/system">
+        <link>/plugins/servlet/reviewgenerator</link>
+        <label key="Review Generation"/>
     </web-item>
 
     <!-- the plugin's admin page -->
     <servlet name="${project.artifactId}"
-             class="com.atlassian.example.reviewcreator.AdminServlet"
-             key="reviewcreator" adminLevel="system">
-        <description>Configuration for Automatic Review Creation</description>
-        <url-pattern>/reviewcreatoradmin</url-pattern>
+             class="org.kuali.crucible.plugin.reviewgenerator.AdminServlet"
+             key="reviewgenerator" adminLevel="system">
+        <description>Configuration for Review Generation</description>
+        <url-pattern>/reviewgenerator</url-pattern>
     </servlet>
 
     <resource type="download" name="lib/" location="templates/lib/"/>

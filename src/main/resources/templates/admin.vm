@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>Automatic review creation based on commit Path</title>
+    <title>Automatic review generation based on commit Path</title>
 
     <!-- using a commenting hack to enable scripts/css during direct file:// access via browser, but
      disable the local path when velocity renders the page -->
@@ -12,8 +12,8 @@
     <!-- *# -->
 
     #* <!-- *#
-    <script src="/download/resources/com.atlassian.plugins.reviewcreator/lib/jquery/jquery.min.js"></script>
-    <link href="/download/resources/com.atlassian.plugins.reviewcreator/lib/bootstrap/css/bootstrap.min.css" rel="stylesheet" media="screen">
+    <script src="/download/resources/org.kuali.crucible.plugin.reviewgenerator/lib/jquery/jquery.min.js"></script>
+    <link href="/download/resources/org.kuali.crucible.plugin.reviewgenerator/lib/bootstrap/css/bootstrap.min.css" rel="stylesheet" media="screen">
     #* --> *#
 
 
@@ -25,25 +25,25 @@
     </style>
 
     <meta name="decorator" content="atl.admin"/>
-    <meta name="admin.sectionName" content="Path Based Review Creation"/>
+    <meta name="admin.sectionName" content="Automatic Review Generation"/>
 
 </head>
 <body>
-#* @vtlvariable name="adminForm" type="com.atlassian.example.reviewcreator.AdminForm" *#
+#* @vtlvariable name="adminForm" type="org.kuali.crucible.plugin.reviewgenerator.AdminForm" *#
 <form method="post">
     <table class="adminTable">
         <tbody>
             <tr>
                 <td>
                     <p>
-                    This plugin subscribes to commit events and creates a review for
-                    each commit whose path matches an expression.
+                    This plugin subscribes to commit events and generates a review for
+                    each commit whose path matches a prefix and expression.
                     </p>
 
                     <!-- p>
-                    Auto review creation can be enabled/disabled on a
-                    per-project basis. Enabled projects must be bound to a FishEye repository
-                    and must have a default Moderator configured in the admin section.
+                    Review generation can be enable/disabled on a per-project or path prefix basis. Enabled projects
+                    must be bound to a FishEye repository and must have a default Moderator configured in the admin
+                    section.
                     </p -->
                     <p>
                         Run plugin as user (not used as review moderator):
@@ -295,8 +295,8 @@
      disable the local paths when velocity renders the page -->
 
 #* <!-- *#
-    <script src="/download/resources/com.atlassian.plugins.reviewcreator/lib/bootstrap/js/bootstrap.min.js"></script>
-    <script src="/download/resources/com.atlassian.plugins.reviewcreator/lib/adminpage.js"></script>
+    <script src="/download/resources/org.kuali.crucible.plugin.reviewgenerator/lib/bootstrap/js/bootstrap.min.js"></script>
+    <script src="/download/resources/org.kuali.crucible.plugin.reviewgenerator/lib/adminpage.js"></script>
 #* --> *#
 
 <!-- #* -->

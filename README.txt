@@ -1,8 +1,11 @@
   INTRODUCTION
 
-This plugin facilitates automatic review creation for each commit made on a
-repository. Review creation can be enable/disabled on a per-project and
-per-user basis.
+This plugin facilitates automatic review generation for commits with files
+whose paths match one of a set of expressions.  Review generation can be
+enable/disabled on a per-project or path prefix basis.
+
+Please note that the license has been inherited from the Atlassian-provided
+fecru-review-creator project which was used as the basis for development.
 
 
   REQUIREMENTS

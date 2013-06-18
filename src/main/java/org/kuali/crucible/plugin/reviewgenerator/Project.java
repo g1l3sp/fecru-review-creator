@@ -1,4 +1,4 @@
-package com.atlassian.example.reviewcreator;
+package org.kuali.crucible.plugin.reviewgenerator;
 
 public class Project {
 

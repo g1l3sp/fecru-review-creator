@@ -1,4 +1,4 @@
-package com.atlassian.example.reviewcreator;
+package org.kuali.crucible.plugin.reviewgenerator;
 
 import com.atlassian.crucible.spi.services.*;
 import com.atlassian.fisheye.plugin.web.helpers.VelocityHelper;
@@ -118,7 +118,7 @@ public class AdminServlet extends HttpServlet {
             handleDelete(req, resp);
         } else {
             // no need to explicitly handle "cancel"
-            resp.sendRedirect("./reviewcreatoradmin");
+            resp.sendRedirect("./reviewgenerator");
         }
     }
 
@@ -126,7 +126,7 @@ public class AdminServlet extends HttpServlet {
         if (StringUtils.isEmpty(queryParameters)) {
             queryParameters = "";
         }
-        resp.sendRedirect("./reviewcreatoradmin?" + queryParameters);
+        resp.sendRedirect("./reviewgenerator?" + queryParameters);
     }
 
     protected void handleSave(final HttpServletRequest req, final HttpServletResponse resp)

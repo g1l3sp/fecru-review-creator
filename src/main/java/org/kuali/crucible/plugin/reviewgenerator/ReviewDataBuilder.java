@@ -1,4 +1,4 @@
-package com.atlassian.example.reviewcreator;
+package org.kuali.crucible.plugin.reviewgenerator;
 
 import com.atlassian.crucible.spi.PermId;
 import com.atlassian.crucible.spi.data.ReviewData;

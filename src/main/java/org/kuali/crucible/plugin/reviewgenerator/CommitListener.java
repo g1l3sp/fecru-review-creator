@@ -1,22 +1,18 @@
-package com.atlassian.example.reviewcreator;
+package org.kuali.crucible.plugin.reviewgenerator;
 
-import com.atlassian.crucible.spi.PermId;
 import com.atlassian.crucible.spi.data.*;
 import com.atlassian.crucible.spi.services.*;
 import com.atlassian.event.Event;
 import com.atlassian.event.EventListener;
-import com.atlassian.example.reviewcreator.*;
 import com.atlassian.fisheye.event.CommitEvent;
 import com.atlassian.fisheye.spi.data.ChangesetDataFE;
 import com.atlassian.fisheye.spi.data.FileRevisionKeyData;
 import com.atlassian.fisheye.spi.services.RevisionDataService;
 import com.atlassian.sal.api.user.UserManager;
-import com.google.common.collect.ImmutableSet;
 import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
 
 import java.util.*;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 
 /**
@@ -412,7 +408,7 @@ public class CommitListener implements EventListener {
      * </p>
      *
      * @param repoKey a FishEye repository key (e.g. "CR").
-     * @param expressionReviewConfigMap the map of {@link com.atlassian.example.reviewcreator.ExpressionReviewConfig}s
+     * @param expressionReviewConfigMap the map of {@link ExpressionReviewConfig}s
      * @return  A map from project key to {@link com.atlassian.crucible.spi.data.ProjectData} for all "enabled" projects
      * within the repository with the given key.
      */

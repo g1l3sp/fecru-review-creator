@@ -1,6 +1,6 @@
-package com.atlassian.example.reviewcreator;
+package org.kuali.crucible.plugin.reviewgenerator;
 
-import static org.junit.Assert.*;
+import org.junit.Assert;
 
 import org.junit.Test;
 import org.junit.Before;
@@ -23,12 +23,12 @@ public class ConfigurationManagerImplTest {
         final String user = "foo";
         final List<String> expected = Arrays.asList("CR", "RC");
         final ConfigurationManagerImpl config = new ConfigurationManagerImpl(store);
-        assertTrue(config.loadExpressionConfigMap().size() == 1);
+        Assert.assertTrue(config.loadExpressionConfigMap().size() == 1);
 //        assertTrue(config.loadEnabledProjects().isEmpty());
-        assertNull(config.loadRunAsUser());
+        Assert.assertNull(config.loadRunAsUser());
 
         config.storeRunAsUser(user);
-        assertEquals(user, config.loadRunAsUser());
+        Assert.assertEquals(user, config.loadRunAsUser());
 
 //        config.storeEnabledProjects(expected);
 //        assertEquals(expected.size(), config.loadEnabledProjects().size());

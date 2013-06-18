@@ -1,4 +1,4 @@
-package com.atlassian.example.reviewcreator;
+package org.kuali.crucible.plugin.reviewgenerator;
 
 import net.sf.json.JSON;
 import net.sf.json.JSONObject;
@@ -8,7 +8,7 @@ import org.junit.Test;
 import java.util.Arrays;
 import java.util.Collections;
 
-import static org.junit.Assert.*;
+import org.junit.Assert;
 
 /**
  * Created with IntelliJ IDEA.
@@ -76,7 +76,7 @@ public class ExpressionReviewConfigTest {
 
 //        ExpressionReviewConfig erc1Reconstituted = (ExpressionReviewConfig)JSONSerializer.toJava(erc1JsonObject);
 
-        assertEquals(erc1, erc1Reconstituted);
+        Assert.assertEquals(erc1, erc1Reconstituted);
     }
 
     @Test
@@ -91,7 +91,7 @@ public class ExpressionReviewConfigTest {
         erc1.setReviewSubjectPrefix(null);
         try {
             erc1.validateConfig();
-            fail("config should be invalid without a reviewSubject");
+            Assert.fail("config should be invalid without a reviewSubject");
         } catch (ExpressionReviewConfig.ReviewValidationException rve) {
             // guud
         }
@@ -101,7 +101,7 @@ public class ExpressionReviewConfigTest {
         erc1.setFileNameExpressions(Arrays.asList("asdf", "[" /* <- invalid */));
         try {
             erc1.validateConfig();
-            fail("config should be invalid with that '[' expression");
+            Assert.fail("config should be invalid with that '[' expression");
         } catch (ExpressionReviewConfig.ReviewValidationException rve) {
             // guud
         }
@@ -112,7 +112,7 @@ public class ExpressionReviewConfigTest {
         erc1.setGroupReviewers(Collections.<String>emptyList());
         try {
             erc1.validateConfig();
-            fail("config should be invalid without any reviewers");
+            Assert.fail("config should be invalid without any reviewers");
         } catch (ExpressionReviewConfig.ReviewValidationException rve) {
             // guud
         }
